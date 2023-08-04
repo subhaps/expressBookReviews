@@ -1,76 +1,81 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
 let books = require("./booksdb.js");
-let isValid = require("./auth_users.js").isValid;
-let users = require("./auth_users.js").users;
-const public_users = express.Router();
+const regd_users = express.Router();
 
-const doesExist = (username) => {
-    let userswithsamename = users.filter((user) => {
-        return user.username === username
+let users = [];
+
+const isValid = (username) => { //returns boolean
+    const validUser = users.filter((user) => {
+        return (user.username === username);
     });
-    if (userswithsamename.length > 0) {
+    if (validUser.length > 0) {
+        return true;
+    } else {
+        return false;
+    }
+
+}
+
+const authenticatedUser = (username, password) => {
+    let validusers = users.filter((user) => {
+        return (user.username === username && user.password === password)
+    });
+    if (validusers.length > 0) {
         return true;
     } else {
         return false;
     }
 }
 
-public_users.post("/register", (req, res) => {
+//only registered users can login
+regd_users.post("/login", (req, res) => {
     const username = req.body.username;
     const password = req.body.password;
-
-    if (username && password) {
-        if (!doesExist(username)) {
-            users.push({ "username": username, "password": password });
-            return res.status(200).json({ message: "User successfully registred. Now you can login" });
-        } else {
-            return res.status(404).json({ message: "User already exists!" });
-        }
+    if (!username || !password) {
+        return res.status(404).json({ message: "Error logging in" });
     }
-    return res.status(404).json({ message: "Unable to register user." });
+    if (authenticatedUser(username, password)) {
+        let accessToken = jwt.sign({
+            data: password
+        }, 'access', { expiresIn: 60 * 60 });
+        req.session.authorization = {
+            accessToken, username
+        }
+        return res.status(200).send("Customer successfully logged in");
+    } else {
+        return res.status(208).json({ message: "Invalid Login. Check username and password" });
+    }
 });
 
-// Get the book list available in the shop
-public_users.get('/', function (req, res) {
-    res.send(JSON.stringify(books, null, 4));
-});
-
-// Get book details based on ISBN
-public_users.get('/isbn/:isbn', function (req, res) {
+// Add a book review
+regd_users.put("/auth/review/:isbn", (req, res) => {
     const isbn = req.params.isbn;
-    res.send(books[isbn]);
+    const review = req.query.review;
+    const username = req.session.authorization.username;
+    if (isValid(username)) {
+        books[isbn].reviews[username] = review;
+        return res.status(200).send(`Review for the book with isbn ${isbn} added/updated.`);
+    } else {
+        return res.status(400).json({ message: "Invalid customer. Please login again." });
+    }
 });
 
-// Get book details based on author
-public_users.get('/author/:author', function (req, res) {
-    const author = req.params.author;
-    const keys = Object.keys(books);
-    const booksByAuthor = keys
-        .filter(key => books[key].author == author)
-        .reduce((obj, key) => {
-            obj[key] = books[key];
-            return obj;
-        }, {});
-    res.send(booksByAuthor);
-});
 
-// Get all books based on title
-public_users.get('/title/:title', function (req, res) {
-    const title = req.params.title;
-    const keys = Object.keys(books);
-    const booksByTitle = keys
-        .filter(key => books[key].title == title)
-        .reduce((obj, key) => {
-            obj[key] = books[key];
-            return obj;
-        }, {});
-    res.send(booksByTitle);
-});
-
-//  Get book review
-public_users.get('/review/:isbn', function (req, res) {
+// Delete a book review
+regd_users.delete("/auth/review/:isbn", (req, res) => {
     const isbn = req.params.isbn;
-    res.send(books[isbn].reviews)
+    const username = req.session.authorization.username;
+    if (isValid(username)) {
+        delete books[isbn].reviews[username];
+        return res.status(200).send(`Review for the book with isbn ${isbn} posted by ${username} deleted.`);
+    } else {
+        return res.status(400).json({ message: "Invalid customer. Please login again." });
+    }
+    
 });
 
-module.exports.general = public_users;
+
+module.exports.authenticated = regd_users;
+module.exports.isValid = isValid;
+module.exports.users = users;
